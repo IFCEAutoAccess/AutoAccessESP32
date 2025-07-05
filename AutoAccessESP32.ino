@@ -122,6 +122,34 @@ void setup(void) {
     esp_camera_fb_return(fb);
   });
 
+  server.on("/camera_view", HTTP_GET, []() {
+    WiFiClient client = server.client();
+
+    String response = "HTTP/1.1 200 OK\r\n";
+    response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+    client.print(response);
+
+    while (1) {
+      camera_fb_t *fb = esp_camera_fb_get();
+      if (!fb) {
+        Serial.println("Falha ao capturar frame");
+        continue;
+      }
+
+      client.printf("--frame\r\n");
+      client.printf("Content-Type: image/jpeg\r\n");
+      client.printf("Content-Length: %u\r\n\r\n", fb->len);
+      client.write(fb->buf, fb->len);
+      client.print("\r\n");
+
+      esp_camera_fb_return(fb);
+
+      if (!client.connected()) break;
+      delay(100); // taxa de quadros: ~10 fps
+    }
+  });
+
+
   // GET ( "*" )
   server.onNotFound([]() {
     server.send(404, "application/json", "{\"message\": \"Page Not Found\"}");
