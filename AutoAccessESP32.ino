@@ -10,6 +10,9 @@ const int flashPin = 4;
 const char *ssid = "CCJ2G";
 const char *password = "Cmj106815#";
 
+uint8_t* last_image = nullptr;
+size_t last_image_size = 0;
+
 WebServer server(80);
 void CORS();
 
@@ -64,6 +67,7 @@ void setup(void) {
   }
   // drop down frame size for higher initial frame rate
   if (config.pixel_format == PIXFORMAT_JPEG) {
+    s->set_special_effect(s, 2);
     s->set_framesize(s, FRAMESIZE_QVGA);
   }
 
@@ -91,7 +95,7 @@ void setup(void) {
     Serial.println("MDNS responder started");
   }
 
-  // GET ( "/" ")
+  // GET (index)
   server.on("/", []() {
     CORS();
     server.send(200, "application/json", "{\"message\": \"Hello from ESP32!\"}");
@@ -109,7 +113,8 @@ void setup(void) {
     digitalWrite(flashPin, LOW);
   });
 
-  server.on("/camera", HTTP_GET, []() {
+  // DEBUG (capture camera image)
+  server.on("/debug_capture", HTTP_GET, []() {
     CORS();
     camera_fb_t *fb = esp_camera_fb_get();
 
@@ -118,11 +123,38 @@ void setup(void) {
       return;
     }
 
-    server.send_P(200, "image/jpeg", (const char*)fb->buf, fb->len);
+    if(last_image != nullptr) {
+      free(last_image);
+      last_image = nullptr;
+    }
+
+    last_image_size = fb->len;
+    last_image = (uint8_t*)malloc(last_image_size);
+    if(last_image == nullptr) {
+      Serial.println("failed to alloc memory");
+      esp_camera_fb_return(fb);
+      return;
+    }
+
+    server.send(200, "application/json", "{\"message\": \"Captured a image successfully\"}");
+    memcpy(last_image, fb->buf, last_image_size);
     esp_camera_fb_return(fb);
   });
 
-  server.on("/camera_view", HTTP_GET, []() {
+  // Get last captured image
+  server.on("/last_capture", HTTP_GET, []() {
+    CORS();
+    if(last_image == nullptr) {
+      server.send(404, "application/json", "{\"message\": \"last capture is empty\"}");
+      return;
+    }
+
+    server.send_P(200, "image/jpeg", (const char*)last_image, last_image_size);
+  });
+
+  // DEBUG (view camera image)
+  server.on("/debug_camera_view", HTTP_GET, []() {
+    CORS();
     WiFiClient client = server.client();
 
     String response = "HTTP/1.1 200 OK\r\n";
@@ -149,10 +181,9 @@ void setup(void) {
     }
   });
 
-
   // GET ( "*" )
   server.onNotFound([]() {
-    server.send(404, "application/json", "{\"message\": \"Page Not Found\"}");
+    server.send(404, "application/json", "{\"message\": \"Command Not Found\"}");
   });
 
   // BEGIN SERVER
